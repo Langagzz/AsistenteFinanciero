@@ -81,7 +81,7 @@ def main():
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
-        # Gráfico de líneas o áreas por mes y categoría (solo gastos negativos)
+        # Gráfico de áreas por mes y categoría (solo gastos)
         monthly = assistant.monthly_summary_df.copy().astype(float)
         monthly.index = monthly.index.astype(str)
         gastos_mensuales = monthly.applymap(lambda x: x if x < 0 else 0)
@@ -96,80 +96,76 @@ def main():
         st.plotly_chart(fig_area, use_container_width=True)
 
         # Consejos para tu economía
+        st.header("Consejos para tu economía")
         tips = assistant.generate_tips()
         for tip in tips:
             st.markdown(f"- {tip}")
 
-                # Suscripciones recurrentes
+        # Suscripciones mensuales
         st.header("Suscripciones mensuales")
         df = assistant.dataframe.copy()
-        # Suscripciones explícitas
         subs_cat = df[df['categoria'] == 'Suscripciones']
-        # Detección heurística: pagos recurrentes (mismo concepto e importe 2+ veces)
-        recurring = (
+        # Detección heurística: cargos recurrentes (2+ veces)
+        rec = (
             df.groupby(['concepto', 'importe'])
-              .agg(count=('fecha_operacion', 'count'), primera_fecha=('fecha_operacion', 'min'))
+              .agg(veces=('fecha_operacion', 'count'),
+                   primera_fecha=('fecha_operacion', 'min'))
               .reset_index()
         )
-        subs_rec = recurring[recurring['count'] >= 2]
-        # Combinar ambas fuentes y eliminar duplicados
-        subs_combined = pd.concat([
-            subs_cat[['concepto', 'importe', 'fecha_operacion']],
-            subs_rec.rename(columns={'primera_fecha': 'fecha_operacion'})[['concepto', 'importe', 'fecha_operacion']]
-        ], ignore_index=True).drop_duplicates(['concepto','importe'])
+        subs_rec = rec[rec['veces'] >= 2]
 
-        if not subs_combined.empty:
-            # Preparamos tabla
-            summary = (
-                subs_combined
-                  .groupby(['concepto','importe'])
-                  .agg(Desde=('fecha_operacion','min'), Cuotas=('concepto','count'))
-                  .reset_index()
-                  .sort_values('Desde')
-            )
-            summary = summary.rename(columns={
-                'concepto':'Suscripción', 'importe':'Importe (€)','Desde':'Desde','Cuotas':'Cuotas detectadas'
-            })
-            st.table(summary)
+        if not subs_cat.empty or not subs_rec.empty:
+            combined = pd.concat([
+                subs_cat.assign(veces=1, primera_fecha=subs_cat['fecha_operacion']),
+                subs_rec
+            ], ignore_index=True).drop_duplicates(['concepto', 'importe'])
+            table = combined[['concepto', 'importe', 'primera_fecha', 'veces']]
+            table = table.rename(columns={
+                'concepto': 'Suscripción',
+                'importe': 'Importe (€)',
+                'primera_fecha': 'Desde',
+                'veces': 'Veces detectadas'
+            }).sort_values('Desde')
+            st.table(table)
         else:
-            st.info("No se detectan suscripciones recurrentes. Ajusta tus palabras clave o añade más conceptos.")
+            st.info("No se detectan suscripciones recurrentes. Ajusta tu diccionario o sube más extractos.")
 
         # Planes de ahorro sugeridos
         st.header("Planes de ahorro sugeridos")
         try:
             plans = assistant.suggest_saving_plan()
-        except Exception:
-            # ... existing fallback logic
-            gastos_mensuales = assistant.monthly_summary_df.apply(
-                lambda row: -row[row < 0].sum(), axis=1
-            )
+        except (AttributeError, NotImplementedError):
+            # Cálculo on-the-fly
+            gastos_mensuales = assistant.monthly_summary_df.apply(lambda row: -row[row < 0].sum(), axis=1)
             gasto_medio = gastos_mensuales.mean()
             total_ingresos = assistant.dataframe[assistant.dataframe.importe > 0].importe.sum()
             total_gastos = assistant.dataframe[assistant.dataframe.importe < 0].importe.sum()
             ahorro_mensual = total_ingresos + total_gastos
-
             plans = []
             if ahorro_mensual > 0:
                 fondo_obj = gasto_medio * 3
                 meses_fondo = fondo_obj / ahorro_mensual
                 plans.append(
-                    f"Objetivo: fondo de emergencia de {fondo_obj:.2f} € (≈3 meses de gastos medios). Con tu ahorro mensual de {ahorro_mensual:.2f} € lo lograrías en {meses_fondo:.1f} meses."
+                    f"Objetivo: fondo de emergencia de {fondo_obj:.2f} € (≈3 meses). "
+                    f"Con tu ahorro mensual de {ahorro_mensual:.2f} € lo lograrías en {meses_fondo:.1f} meses."
                 )
                 vac_obj = gasto_medio
-                percent = 0.10
-                aportacion = total_ingresos * percent
+                aportacion = total_ingresos * 0.10
                 meses_vac = vac_obj / aportacion if aportacion > 0 else float('inf')
                 plans.append(
-                    f"Objetivo: reservar {vac_obj:.2f} € para vacaciones. Si apartas el {int(percent*100)}% de tus ingresos ({aportacion:.2f} €), lo lograrás en {meses_vac:.1f} meses."
+                    f"Objetivo: reservar {vac_obj:.2f} € para vacaciones. Si apartas el 10% de tus ingresos "
+                    f"({aportacion:.2f} €), lo lograrás en {meses_vac:.1f} meses."
                 )
             else:
                 plans.append("No detecto ahorro mensual positivo. Revisa tus ingresos o gastos.")
         for plan in plans:
             st.markdown(f"- {plan}")
+
     else:
         st.info(
             "Por favor, sube un archivo para comenzar el análisis. Puedes exportar tu extracto bancario desde tu banco en formato Excel o CSV."
         )
+
 
 if __name__ == "__main__":
     main()
