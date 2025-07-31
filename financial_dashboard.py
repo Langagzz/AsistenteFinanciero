@@ -100,20 +100,39 @@ def main():
         for tip in tips:
             st.markdown(f"- {tip}")
 
-        # Suscripciones recurrentes
+                # Suscripciones recurrentes
         st.header("Suscripciones mensuales")
-        subs = assistant.dataframe[assistant.dataframe['categoria'] == 'Suscripciones']
-        if not subs.empty:
-            # Agrupamos por descripción y monto
-            subs_summary = subs.groupby(['concepto', 'importe']).agg(
-                primera_factura=('fecha_operacion', 'min'),
-                cantidad_meses=('fecha_operacion', 'nunique')
-            ).reset_index()
-            # Mostramos listado
-            for _, row in subs_summary.iterrows():
-                st.write(f"**{row['concepto']}**: {row['importe']:.2f} € / mes · Desde {row['primera_factura'].date()} ({row['cantidad_meses']} meses)")
+        df = assistant.dataframe.copy()
+        # Suscripciones explícitas
+        subs_cat = df[df['categoria'] == 'Suscripciones']
+        # Detección heurística: pagos recurrentes (mismo concepto e importe 2+ veces)
+        recurring = (
+            df.groupby(['concepto', 'importe'])
+              .agg(count=('fecha_operacion', 'count'), primera_fecha=('fecha_operacion', 'min'))
+              .reset_index()
+        )
+        subs_rec = recurring[recurring['count'] >= 2]
+        # Combinar ambas fuentes y eliminar duplicados
+        subs_combined = pd.concat([
+            subs_cat[['concepto', 'importe', 'fecha_operacion']],
+            subs_rec.rename(columns={'primera_fecha': 'fecha_operacion'})[['concepto', 'importe', 'fecha_operacion']]
+        ], ignore_index=True).drop_duplicates(['concepto','importe'])
+
+        if not subs_combined.empty:
+            # Preparamos tabla
+            summary = (
+                subs_combined
+                  .groupby(['concepto','importe'])
+                  .agg(Desde=('fecha_operacion','min'), Cuotas=('concepto','count'))
+                  .reset_index()
+                  .sort_values('Desde')
+            )
+            summary = summary.rename(columns={
+                'concepto':'Suscripción', 'importe':'Importe (€)','Desde':'Desde','Cuotas':'Cuotas detectadas'
+            })
+            st.table(summary)
         else:
-            st.write("No se detectan suscripciones recurrentes. Asegúrate de que la categoría 'Suscripciones' esté bien configurada.")
+            st.info("No se detectan suscripciones recurrentes. Ajusta tus palabras clave o añade más conceptos.")
 
         # Planes de ahorro sugeridos
         st.header("Planes de ahorro sugeridos")
