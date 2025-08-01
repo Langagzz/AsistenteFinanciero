@@ -1,7 +1,6 @@
 streamlit
+plotly
 pandas
 numpy
-plotly
-xlrd
+xlrd>=2.0.2
 openpyxl
-
