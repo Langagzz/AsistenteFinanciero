@@ -1,14 +1,13 @@
 {
-  "finanzas": [ … ],
-  "servicios": [ … ],
-  // …
-  "mascotas": [ … ],
-
-  // Nuevo bloque:
-  "suscripciones": [
-    "digi", "digimobil", "telefonica", "vodafone", "orange",
-    "jazztel", "movistar", "internet", "fibra",
-    "netflix", "spotify", "youtube", "google", "prime",
-    "amazon", "hulu", "apple", "music", "prime video"
-  ]
+  "finanzas": ["transferencia", "transfer", "bizum", "paypal", "comision", "comisiones", "cuota", "liquidacion contrato", "retirada", "ingreso", "nomina", "mantenimiento", "cajero", "atm", "reintegro", "pension", "abono", "devolucion"],
+  "servicios": ["telefonica", "digi", "internet", "fibra", "vodafone", "orange", "jazztel", "electricidad", "luz", "endesa", "iberdrola", "naturgy", "agua", "gas", "factura"],
+  "salud": ["medico", "sanitas", "seguro medico", "hospital", "farmacia", "parafarmacia", "dentista"],
+  "viajes": ["hotel", "alojamiento", "airbnb", "booking", "vueling", "renfe", "iberia", "vuelo", "billete"],
+  "compras": ["zara", "primark", "h&m", "pull&bear", "pull and bear", "bershka", "decathlon", "amazon", "corte ingles", "fnac", "ikea", "aliexpress", "game", "electronica", "farmacia", "farmac", "supercor"],
+  "ocio": ["netflix", "spotify", "gym", "gimnasio", "deporte", "cine", "cinepolis", "teatro", "estanco", "tabaco", "loteria", "apuesta", "pub", "cerveceria", "discoteca"],
+  "impuestos": ["impuesto", "tasas", "dgt", "multas", "hacienda", "seguridad social"],
+  "restauracion": ["restaurante", "restaurant", "bar", "cafeteria", "cafetería", "cafe", "cerveceria", "cervecería", "pub", "pizzeria", "pizzería", "burger", "kebab", "sushi", "taberna", "marisqueria", "merendero", "hamburguesa", "bocateria", "bocatería", "comida rapida"],
+  "transporte": ["repsol", "cepsa", "ballenoil", "bp", "terzo", "cedipsa", "estacion de servicio", "gasolinera", "combustible", "gasolina", "diesel", "peaje", "parking", "aparcamiento", "taxi", "uber", "bus", "metro", "tren"],
+  "alimentacion": ["mercadona", "carrefour", "dia", "lidl", "eroski", "alcampo", "hiper", "supermercado", "super", "misuper", "condis", "caprabo", "panaderia", "pasteleria", "fruteria", "carniceria", "pescaderia", "alimentacion", "comestibles", "ultramarinos", "camper", "galileo"],
+  "mascotas": ["veterinario", "pet", "mascotas"]
 }
