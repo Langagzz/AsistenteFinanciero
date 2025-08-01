@@ -1,111 +1,113 @@
+# detect_subs.py
+
+#!/usr/bin/env python3
+"""
+detect_subs.py
+
+Detecta posibles suscripciones mensuales (pagos que se repiten en ≥MIN_MONTHS meses distintos)
+en tu extracto bancario (CSV o Excel).
+
+Uso:
+    python detect_subs.py [ruta_fichero]
+Si no pasas ruta, usará 'export2025730.csv' o 'export2025730.xls/xlsx' en el directorio actual.
+"""
+
 import os
-import re
-from datetime import datetime
-from typing import List, Tuple
-
+import sys
 import pandas as pd
+from datetime import datetime
+from typing import Tuple
 
-# Nombre de la columna de fecha en tu extracto
-DATE_COL = "FECHA OPERACIÓN"
+# Número mínimo de meses distintos para considerar un cargo "suscripción"
+MIN_MONTHS = 2
 
-# Proveedores habituales de suscripción (keywords en minúsculas)
-SUB_PROVIDERS = [
-    "digimobil", "digi spain", "netflix", "spotify", "youtube", "yt music",
-    "apple", "itunes", "amazon", "prime", "hbo", "disney+", "movistar", "vodafone"
-]
+# Nombre de la columna fecha en tu extracto
+DATE_COL = 'FECHA OPERACIÓN'
 
-def normalize_concept(concept: str) -> str:
-    """Pone en minúsculas y elimina múltiples espacios/puntuación."""
-    text = concept.lower()
-    text = re.sub(r"[^\w ]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-def detect_subscriptions(path: str, min_months: int = 3) -> pd.DataFrame:
+def load_transactions(path: str) -> pd.DataFrame:
     """
-    Detecta cargos recurrentes mensuales en el extracto.
-    - path: ruta al XLS/XLSX o CSV exportado de tu banco.
-    - min_months: número mínimo de meses distintos para considerarlo suscripción.
-    Devuelve un DataFrame con columnas:
-      ['concepto_normalizado','importe','first_date','last_date','months_count']
+    Carga el extracto (CSV o Excel) en un DataFrame y devuelve las columnas
+    necesarias (fecha, concepto, importe).
     """
     ext = os.path.splitext(path)[1].lower()
-    # Lectura según extensión
-    if ext in (".xls", ".xlsx"):
-        engine = "xlrd" if ext == ".xls" else "openpyxl"
-        df = pd.read_excel(
-            path,
-            header=7,
-            engine=engine,
-            parse_dates=[DATE_COL],
-            dayfirst=True,
-            dtype=str,
-        )
-    elif ext == ".csv":
-        # Detecta separador (punto y coma o comas)
-        sample = open(path, encoding="utf-8", errors="ignore").read(2048)
-        sep = ";" if ";" in sample and sample.count(";") > sample.count(",") else ","
-        df = pd.read_csv(
-            path,
-            sep=sep,
-            header=7,
-            parse_dates=[DATE_COL],
-            dayfirst=True,
-            dtype=str,
-        )
-    else:
-        raise RuntimeError(f"Formato no soportado: {ext}")
+    try:
+        if ext in ('.csv', '.txt'):
+            df = pd.read_csv(path,
+                             sep=';',
+                             header=7,
+                             dtype=str,
+                             usecols=[DATE_COL, 'CONCEPTO', 'IMPORTE EUR'])
+        else:
+            df = pd.read_excel(path,
+                               header=7,
+                               dtype=str)  # CSV y Excel
+    except Exception as e:
+        raise RuntimeError(f"Error al leer el fichero: {e}")
 
-    # Normalizamos columnas
     if DATE_COL not in df.columns:
-        raise RuntimeError(f"No se encontró la columna de fecha '{DATE_COL}'.")
-    if "CONCEPTO" not in df.columns and "CONCEPTO;" not in df.columns:
-        raise RuntimeError("No se encontró la columna de concepto.")
+        raise RuntimeError(f"No se encuentra la columna de fecha '{DATE_COL}'. Columnas disponibles: {list(df.columns)}")
 
-    # Ajuste de nombre de columna 'CONCEPTO' con o sin punto y coma
-    concept_col = "CONCEPTO"
-    if concept_col not in df.columns:
-        # si aparece con punto y coma en CSV
-        for c in df.columns:
-            if c.startswith("CONCEPTO"):
-                concept_col = c
-                break
+    df = df.rename(columns={'CONCEPTO': 'concepto', 'IMPORTE EUR': 'importe', DATE_COL: 'fecha'})
+    # Convertimos importe a float
+    df['importe'] = df['importe'].str.replace(',', '.').astype(float)
+    # Parseamos fecha con dayfirst=True
+    df['fecha'] = pd.to_datetime(df['fecha'], dayfirst=True, errors='coerce')
+    df = df.dropna(subset=['fecha'])
+    return df[['fecha', 'concepto', 'importe']]
 
-    # Preparamos datos
-    df = df[[DATE_COL, concept_col, 'IMPORTE EUR']].dropna(subset=[DATE_COL, concept_col])
-    df[DATE_COL] = pd.to_datetime(df[DATE_COL], dayfirst=True, errors="coerce")
-    df = df.dropna(subset=[DATE_COL])
-    df['importe'] = df['IMPORTE EUR'].astype(float)
-    df['concepto_norm'] = df[concept_col].apply(normalize_concept)
+def detect_subscriptions(path: str) -> pd.DataFrame:
+    df = load_transactions(path)
 
-    # Filtrar sólo importes negativos (cargos)
-    cargos = df[df['importe'] < 0].copy()
-
-    # Agrupamos por concepto normalizado
-    grupos = cargos.groupby('concepto_norm')
-
-    registros: List[Tuple[str, float, datetime, datetime, int]] = []
-    for concept, g in grupos:
-        # Comprobar proveedor en la lista de suscripciones
-        if not any(prov in concept for prov in SUB_PROVIDERS):
-            continue
-
-        # Meses distintos
-        meses = g[DATE_COL].dt.to_period("M").unique()
-        if len(meses) < min_months:
-            continue
-
-        importe_mean = g['importe'].mean()
-        first = g[DATE_COL].min()
-        last = g[DATE_COL].max()
-        registros.append((concept, importe_mean, first, last, len(meses)))
-
-    # Construimos DataFrame de resultado
-    df_subs = pd.DataFrame(
-        registros,
-        columns=['concepto', 'importe', 'first_date', 'last_date', 'meses_distintos']
+    # Creamos columna mes
+    df['mes'] = df['fecha'].dt.to_period('M')
+    # Agrupamos por concepto e importe parecido (redondeado)
+    grouped = (
+        df.assign(concepto_norm=df['concepto'].str.lower().str.strip())
+          .groupby(['concepto_norm'])
     )
 
-    # Ordenar por fecha de inicio
-    df_subs = df_subs.sort_values('first_date').reset_index(drop=True)
-    return df_subs
+    subs = grouped.apply(lambda g: pd.Series({
+        'importe': round(g['importe'].mean(), 2),
+        'meses_distintos': g['mes'].nunique(),
+        'total_cargos': len(g),
+        'primer_pago': g['fecha'].min(),
+        'ultimo_pago': g['fecha'].max()
+    })).reset_index()
+
+    # Filtramos solo los que tienen al menos MIN_MONTHS meses distintos
+    subs = subs[subs['meses_distintos'] >= MIN_MONTHS]
+    # Ordenamos por meses_distintos desc
+    subs = subs.sort_values('meses_distintos', ascending=False)
+
+    return subs[['concepto_norm', 'importe', 'meses_distintos', 'total_cargos', 'primer_pago', 'ultimo_pago']]
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    if path is None:
+        # Intentamos CSV primero, luego XLS, luego XLSX
+        for candidate in ('export2025730.csv', 'export2025730.xls', 'export2025730.xlsx'):
+            if os.path.exists(candidate):
+                path = candidate
+                break
+    if not path or not os.path.exists(path):
+        print("No se encontró el fichero. Pasa la ruta como argumento o pon 'export2025730.csv/xls/xlsx' aquí.")
+        sys.exit(1)
+
+    try:
+        subs = detect_subscriptions(path)
+    except Exception as e:
+        print(f"Error al detectar suscripciones: {e}")
+        sys.exit(1)
+
+    if subs.empty:
+        print(f"No se detectaron cargos repetidos en ≥{MIN_MONTHS} meses diferentes.")
+    else:
+        print(f"\nPosibles suscripciones (≥{MIN_MONTHS} meses distintos):\n")
+        print(subs.to_string(
+            index=False,
+            columns=['concepto_norm','importe','meses_distintos','total_cargos','primer_pago','ultimo_pago'],
+            header=['Concepto','Importe (€)','Meses distintos','Veces totales','Primer pago','Último pago']
+        ))
+
+if __name__ == '__main__':
+    main()
