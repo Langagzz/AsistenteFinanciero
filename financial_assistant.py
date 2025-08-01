@@ -1,482 +1,179 @@
 
-"""Financial Assistant CLI utility."""
-from __future__ import annotations
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+financial_assistant.py
+----------------------
+
+Este módulo define un asistente financiero sencillo que permite:
+
+- Cargar un extracto bancario en Excel (.xls/.xlsx) o CSV.
+- Clasificar automáticamente transacciones por categorías usando un diccionario de keywords.
+- Calcular resúmenes de ingresos/gastos y ofrecer tips de ahorro.
+- Detectar PLANES DE AHORRO (siguiente cuota / objetivo).
+- Detectar SUSCRIPCIONES periódicas **solo** de proveedores listados en categories.json.
+
+Para usarlo, instala dependencias:
+    pip install pandas numpy
+
+Y luego:
+    python financial_assistant.py export2025730.csv
+"""
 
 import json
 import sys
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import List, Dict, Optional
 
 import numpy as np
 import pandas as pd
 
-
-# Diccionario por defecto de categorías y palabras clave
-DEFAULT_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
-    "finanzas": [
-        "transferencia",
-        "transfer",
-        "bizum",
-        "paypal",
-        "comision",
-        "comisiones",
-        "cuota",
-        "liquidacion contrato",
-        "retirada",
-        "ingreso",
-        "nomina",
-        "mantenimiento",
-        "cajero",
-        "atm",
-        "reintegro",
-        "pension",
-
-        "abono",
-        "devolucion",
-    ],
-    "servicios": [
-        "telefonica",
-        "digi",
-        "internet",
-        "fibra",
-        "vodafone",
-        "orange",
-        "jazztel",
-        "electricidad",
-        "luz",
-        "endesa",
-        "iberdrola",
-        "naturgy",
-        "agua",
-        "gas",
-        "factura",
-    ],
-    "salud": [
-        "medico",
-        "sanitas",
-        "seguro medico",
-        "hospital",
-        "farmacia",
-        "parafarmacia",
-        "dentista",
-    ],
-    "viajes": [
-        "hotel",
-        "alojamiento",
-        "airbnb",
-        "booking",
-        "vueling",
-        "renfe",
-        "iberia",
-        "vuelo",
-        "billete",
-    ],
-    "compras": [
-        "zara",
-        "primark",
-        "h&m",
-        "pull&bear",
-        "pull and bear",
-        "bershka",
-        "decathlon",
-        "amazon",
-        "corte ingles",
-        "fnac",
-        "ikea",
-        "aliexpress",
-        "game",
-        "electronica",
-        "farmacia",
-        "farmac",
-        "supercor",
-    ],
-    "ocio": [
-        "netflix",
-        "spotify",
-        "gym",
-        "gimnasio",
-        "deporte",
-        "cine",
-        "cinepolis",
-        "teatro",
-        "estanco",
-        "tabaco",
-        "loteria",
-        "apuesta",
-        "pub",
-        "cerveceria",
-        "discoteca",
-    ],
-    "impuestos": [
-        "impuesto",
-        "tasas",
-        "dgt",
-        "multas",
-        "hacienda",
-        "seguridad social",
-    ],
-    "restauracion": [
-        "restaurante",
-        "restaurant",
-        "bar",
-        "cafeteria",
-        "cafetería",
-        "cafe",
-        "cerveceria",
-        "cervecería",
-        "pub",
-        "pizzeria",
-        "pizzería",
-        "burger",
-        "kebab",
-        "sushi",
-        "taberna",
-        "marisqueria",
-        "merendero",
-        "hamburguesa",
-        "bocateria",
-        "bocatería",
-        "comida rapida",
-    ],
-    "transporte": [
-        "repsol",
-        "cepsa",
-        "ballenoil",
-        "bp",
-        "terzo",
-        "cedipsa",
-        "estacion de servicio",
-        "gasolinera",
-        "combustible",
-        "gasolina",
-        "diesel",
-        "peaje",
-        "parking",
-        "aparcamiento",
-        "taxi",
-        "uber",
-        "bus",
-        "metro",
-        "tren",
-    ],
-    "alimentacion": [
-        "mercadona",
-        "carrefour",
-        "dia",
-        "lidl",
-        "eroski",
-        "alcampo",
-        "hiper",
-        "supermercado",
-        "super",
-        "misuper",
-        "condis",
-        "caprabo",
-        "panaderia",
-        "pasteleria",
-        "fruteria",
-        "carniceria",
-        "pescaderia",
-        "alimentacion",
-        "comestibles",
-        "ultramarinos",
-        "camper",
-        "galileo",
-    ],
-    "mascotas": [
-        "veterinario",
-        "pet",
-        "mascotas",
-    ],
-}
-
-
-def _normalize_description(desc: str) -> str:
-    """Normaliza la descripción para facilitar la búsqueda de palabras clave."""
-    if not isinstance(desc, str):
-        return ""
-    desc = desc.lower()
-    for prefix in [
-        "pago movil en",
-        "pago móvil en",
-        "pago mov en",
-        "pago movil",
-        "pago móvil",
-        "pago mov.",
-        "transaccion contactless en",
-        "transacción contactless en",
-        "transaccion contactless",
-        "transacción contactless",
-        "compra en",
-        "compra",
-        "recibo de",
-        "recibo",
-        "cargo de",
-        "abono de",
-    ]:
-        if desc.startswith(prefix):
-            desc = desc[len(prefix) :]
-            break
-
-    for token in [",", ";", ":", ".", "-", "*", "#", "!", "@"]:
-        desc = desc.replace(token, " ")
-    desc = " ".join(desc.split())
-    return desc
-
-
-@dataclass
 class FinancialAssistant:
-    filename: str
-    categories_file: str = "categories.json"
-    dataframe: pd.DataFrame = field(default_factory=pd.DataFrame, init=False)
-    monthly_summary_df: Optional[pd.DataFrame] = None
-    category_totals: Optional[pd.DataFrame] = None
-    category_keywords: Dict[str, List[str]] = field(default_factory=dict, init=False)
+    def __init__(self, filepath: str, categories_path: str = "categories.json"):
+        self.filepath = filepath
+        self.df = pd.DataFrame()
+        self.monthly_summary_df = None
 
-    def __post_init__(self) -> None:
-        self.category_keywords = self._load_categories()
-
-    def _load_categories(self) -> Dict[str, List[str]]:
+        # Carga keywords desde JSON
         try:
-            with open(self.categories_file, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-                return {k: [w.lower() for w in v] for k, v in data.items()}
-        except FileNotFoundError:
-            return DEFAULT_CATEGORY_KEYWORDS
+            with open(categories_path, encoding="utf-8") as f:
+                self.category_keywords: Dict[str, List[str]] = json.load(f)
+        except Exception as e:
+            raise RuntimeError(f"No pude leer '{categories_path}': {e}")
 
-    def load_transactions(self) -> None:
-
-        """Carga el fichero de movimientos bancarios en un DataFrame."""
-        if self.filename.lower().endswith((".xls", ".xlsx", ".xlsm")):
-            df_raw = pd.read_excel(self.filename, header=None)
-            read_func = pd.read_excel
-
-        elif self.filename.lower().endswith(".csv"):
-            df_raw = pd.read_csv(self.filename, header=None)
-            read_func = pd.read_csv
+    def load_transactions(self):
+        """Carga el fichero Excel/CSV en self.df normalizando columnas."""
+        ext = self.filepath.lower().split('.')[-1]
+        if ext in ("xls", "xlsx"):
+            df = pd.read_excel(self.filepath, header=7 engine="openpyxl")
         else:
-            raise ValueError(f"Formato de archivo no reconocido: {self.filename}")
-
-        df_raw = read_func(self.filename, header=None)
-
-        header_row = None
-        for idx, row in df_raw.iterrows():
-
-            if row.astype(str).str.contains("CONCEPTO", case=False, na=False).any():
-                header_row = idx
-                break
-        if header_row is None:
-            raise ValueError("No se ha encontrado la fila de cabeceras en el archivo")
-
-
-        df = read_func(self.filename, header=header_row)
-        rename_map: Dict[str, str] = {}
-        for col in df.columns:
-            lc = str(col).lower().strip()
-
-            if "fecha operacion" in lc or "fecha operación" in lc:
-                rename_map[col] = "fecha_operacion"
-            elif "fecha valor" in lc:
-                rename_map[col] = "fecha_valor"
-            elif "concepto" in lc:
-                rename_map[col] = "concepto"
-            elif "importe" in lc:
-                rename_map[col] = "importe"
-            elif "saldo" in lc:
-                rename_map[col] = "saldo"
-        df = df.rename(columns=rename_map)
-
-        df = df[df["importe"].notnull()]
-        df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce")
-        df["importe"] = pd.to_numeric(df["importe"], errors="coerce")
-        df["saldo"] = pd.to_numeric(df["saldo"], errors="coerce")
-        df["concepto"] = df["concepto"].astype(str)
-        df = df.dropna(subset=["fecha_operacion", "importe"])
-        self.dataframe = df.reset_index(drop=True)
-
-    def classify_transactions(self) -> None:
-
-        """Clasifica cada movimiento usando las categorías definidas."""
-        if self.dataframe.empty:
-
-            raise RuntimeError("Primero carga los movimientos con load_transactions().")
-
-        categories: List[str] = []
-        descriptions = self.dataframe["concepto"].apply(_normalize_description)
-        for desc, amount in zip(descriptions, self.dataframe["importe"]):
-            category_assigned: Optional[str] = None
-
-            for cat, keywords in self.category_keywords.items():
-                if any(kw in desc for kw in keywords):
-                    category_assigned = cat
-                    break
-            if category_assigned is None:
-                category_assigned = "finanzas" if amount > 0 else "otros"
-            categories.append(category_assigned)
-        self.dataframe["categoria"] = categories
-
-    def compute_summaries(self) -> None:
-
-        if "categoria" not in self.dataframe.columns:
-            raise RuntimeError("Primero clasifica las transacciones con classify_transactions().")
-        category_totals = (
-
-            self.dataframe.groupby("categoria")["importe"].sum().reset_index().sort_values("importe", ascending=False)
+            df = pd.read_csv(self.filepath, header=7, sep=';', encoding='utf-8')
+        df = df.rename(
+            columns={
+                'FECHA OPERACIÓN': 'fecha_operacion',
+                'CONCEPTO': 'concepto',
+                'IMPORTE EUR': 'importe'
+            }
         )
-        self.category_totals = category_totals
-        df = self.dataframe.copy()
+        # Convertir fecha a datetime
+        df['fecha_operacion'] = pd.to_datetime(df['fecha_operacion'], dayfirst=True, errors='coerce')
+        df = df.dropna(subset=['fecha_operacion'])
+        self.df = df
 
-        df["mes"] = df["fecha_operacion"].dt.to_period("M")
-        monthly = df.pivot_table(index="mes", columns="categoria", values="importe", aggfunc="sum", fill_value=0)
-        self.monthly_summary_df = monthly.sort_index()
+    def classify_transactions(self):
+        """Clasifica cada fila en una categoría según keywords."""
+        if self.df.empty:
+            raise RuntimeError("Debe cargar las transacciones primero.")
+        cats = []
+        for text in self.df['concepto'].astype(str).str.lower():
+            found = False
+            for cat, keys in self.category_keywords.items():
+                if any(k in text for k in keys):
+                    cats.append(cat)
+                    found = True
+                    break
+            cats.append('Otros' if not found else None)
+        self.df['categoria'] = cats
+
+    def compute_summaries(self):
+        """Calcula resumen mensual de ingresos/gastos para consejos."""
+        if self.df.empty:
+            raise RuntimeError("Debe cargar las transacciones primero.")
+        self.monthly_summary_df = (
+            self.df
+            .assign(mes=self.df['fecha_operacion'].dt.to_period("M"))
+            .groupby('mes')['importe']
+            .sum()
+            .to_frame()
+        )
 
     def generate_tips(self) -> List[str]:
-        if self.category_totals is None:
-            raise RuntimeError("Debe ejecutar compute_summaries() antes de generar consejos.")
-        tips: List[str] = []
-
-        total_ingresos = self.dataframe[self.dataframe["importe"] > 0]["importe"].sum()
-        total_gastos = -self.dataframe[self.dataframe["importe"] < 0]["importe"].sum()
-        ahorro_neto = total_ingresos - total_gastos
-        if total_ingresos > 0:
-
-            porcentaje_necesidades = (
-                -self.dataframe[
-                    (self.dataframe["categoria"].isin({"alimentacion", "servicios", "salud", "transporte", "impuestos"}))
-                    & (self.dataframe["importe"] < 0)
-                ]["importe"].sum()
-                / total_ingresos
-                * 100
-            )
-            porcentaje_ocio = (
-                -self.dataframe[
-                    (self.dataframe["categoria"].isin({"restauracion", "ocio", "compras", "viajes", "mascotas"}))
-                    & (self.dataframe["importe"] < 0)
-                ]["importe"].sum()
-                / total_ingresos
-                * 100
-            )
-            tips.append(
-
-                f"Ahorro neto actual: {ahorro_neto:.2f} EUR. Necesidades {porcentaje_necesidades:.1f}%, ocio {porcentaje_ocio:.1f}%"
-            )
-        comisiones = self.dataframe[(self.dataframe["categoria"] == "finanzas") & (self.dataframe["importe"] < 0)]
-        if not comisiones.empty:
-            total_comisiones = -comisiones["importe"].sum()
-            tips.append(
-
-                f"Has pagado {total_comisiones:.2f} EUR en comisiones bancarias. Considera un banco sin comisiones."
-            )
+        """Genera consejos básicos basados en porcentajes 50/30/20."""
+        if self.monthly_summary_df is None:
+            raise RuntimeError("Debe ejecutar compute_summaries() primero.")
+        total_ing = self.df.loc[self.df['importe'] > 0, 'importe'].sum()
+        total_gast = -self.df.loc[self.df['importe'] < 0, 'importe'].sum()
+        savings_rate = (total_ing - total_gast) / total_ing * 100 if total_ing else 0.0
+        # Ejemplos de tip
+        tips = [
+            f"Tu tasa de ahorro es {savings_rate:.1f}%. Intenta 20% ahorros.",
+            "Revisa tus principales categorías de gasto y reduce las mayores."
+        ]
         return tips
 
-    def suggest_saving_plan(self) -> List[str]:
-        if self.monthly_summary_df is None:
-
-            raise RuntimeError("Debe ejecutar compute_summaries() antes de planificar el ahorro.")
-        df = self.dataframe.copy()
-
-        df["mes"] = df["fecha_operacion"].dt.to_period("M")
-        ingresos = df[df["importe"] > 0].groupby("mes")["importe"].sum()
-        gastos = -df[df["importe"] < 0].groupby("mes")["importe"].sum()
-        plans: List[str] = []
-        for mes in sorted(ingresos.index.union(gastos.index)):
-            ing = float(ingresos.get(mes, 0))
-            gast = float(gastos.get(mes, 0))
-            if ing == 0:
-                plans.append(f"Mes {mes}: sin ingresos registrados.")
-                continue
-            objetivo = ing * 0.20
-            ahorro_real = ing - gast
-            mes_str = str(mes)
-            if ahorro_real >= objetivo:
-                plans.append(
-
-                    f"Mes {mes_str}: buen trabajo, ahorraste {ahorro_real:,.2f} EUR (objetivo {objetivo:,.2f} EUR)."
-                )
-            else:
-                falta = objetivo - ahorro_real
-                plans.append(
-
-                    f"Mes {mes_str}: intenta ahorrar {falta:,.2f} EUR más para alcanzar el 20% de tus ingresos ({objetivo:,.2f} EUR)."
-                )
-        return plans
-
     def detect_subscriptions(self, amount_tolerance: float = 2.0) -> pd.DataFrame:
-        """Detecta cargos periódicos con importe similar."""
-        if self.dataframe.empty:
-            raise RuntimeError("Cargue y clasifique las transacciones antes de detectar suscripciones.")
-        df = self.dataframe.copy()
-        df = df[df["importe"] < 0]
-        df["desc_norm"] = df["concepto"].apply(_normalize_description)
-        subs = []
-        for desc, group in df.groupby("desc_norm"):
+        """
+        Detecta SUSCRIPCIONES periódicas solo de proveedores listados en categories.json.
+        
+        - Filtra importes < 0 (gastos).
+        - Normaliza el texto a minúsculas.
+        - Se queda solo con aquellos que contienen alguna keyword de 'suscripciones'.
+        - Agrupa por texto e importe, filtra por ruido de importe (< tolerance) y periodicidad:
+          mensual (25–35 días), trimestral (85–95 días), anual (355–375 días).
+        """
+        if self.df.empty:
+            raise RuntimeError("Cargue y clasifique antes de detectar suscripciones.")
+
+        # 1) Filtramos solo gastos y normalizamos descripción
+        df = self.df[self.df['importe'] < 0].copy()
+        df['desc_norm'] = df['concepto'].str.lower()
+
+        # 2) Solo proveedores de subs
+        subs_keys = self.category_keywords.get('suscripciones', [])
+        df = df[df['desc_norm'].apply(lambda d: any(k in d for k in subs_keys))]
+        if df.empty:
+            return pd.DataFrame()
+
+        # 3) Detectamos periodicidad
+        records = []
+        for desc, group in df.groupby(['desc_norm', 'importe']):
+            desc_text, imp = desc
             if len(group) < 2:
                 continue
-            if group["importe"].std() > amount_tolerance:
+            if group['importe'].std() > amount_tolerance:
                 continue
-            fechas = group["fecha_operacion"].sort_values()
+            fechas = group['fecha_operacion'].sort_values()
             diffs = fechas.diff().dt.days.dropna()
             if len(diffs) < 2:
                 continue
             med = diffs.median()
             if 25 <= med <= 35:
-                freq = "mensual"
+                freq = 'mensual'
             elif 85 <= med <= 95:
-                freq = "trimestral"
+                freq = 'trimestral'
             elif 355 <= med <= 375:
-                freq = "anual"
+                freq = 'anual'
             else:
                 continue
-            subs.append(
-                {
-                    "descripcion": desc,
-                    "importe_medio": round(group["importe"].mean(), 2),
-                    "frecuencia": freq,
-                    "veces": len(group),
-                    "primer_pago": fechas.min().date().isoformat(),
-                    "ultimo_pago": fechas.max().date().isoformat(),
-                }
-            )
-        return pd.DataFrame(subs)
+            records.append({
+                'descripcion': desc_text,
+                'importe_medio': round(float(group['importe'].mean()), 2),
+                'frecuencia': freq,
+                'veces': len(group),
+                'primer_pago': fechas.min().date().isoformat(),
+                'ultimo_pago': fechas.max().date().isoformat()
+            })
+        return pd.DataFrame(records)
 
+def main():
+    if len(sys.argv) < 2:
+        print("Uso: python financial_assistant.py <extracto.csv|.xls>", file=sys.stderr)
+        sys.exit(1)
+    fa = FinancialAssistant(sys.argv[1])
+    fa.load_transactions()
+    fa.classify_transactions()
+    fa.compute_summaries()
 
-def main(argv: List[str]) -> int:
-    if len(argv) != 2:
-        print("Uso: python financial_assistant.py <fichero.csv|xls>")
-        return 1
-    filename = argv[1]
-    assistant = FinancialAssistant(filename)
-    try:
-        assistant.load_transactions()
-        assistant.classify_transactions()
-        assistant.compute_summaries()
-        tips = assistant.generate_tips()
-        plans = assistant.suggest_saving_plan()
-        subs = assistant.detect_subscriptions()
-        print("\n=== Resumen de ingresos y gastos ===")
-        total_ingresos = assistant.dataframe[assistant.dataframe["importe"] > 0]["importe"].sum()
-        total_gastos = -assistant.dataframe[assistant.dataframe["importe"] < 0]["importe"].sum()
-        print(f"Ingresos totales: {total_ingresos:,.2f} EUR")
-        print(f"Gastos totales: {total_gastos:,.2f} EUR")
-        print(f"Ahorro neto: {total_ingresos - total_gastos:,.2f} EUR")
-        print("\nSuscripciones detectadas:")
-        if subs.empty:
-            print("  (ninguna)")
-        else:
-            print(subs.to_string(index=False))
-        print("\nConsejos para mejorar tu economía:")
-        for idx, tip in enumerate(tips, start=1):
-            print(f"{idx}. {tip}")
-        print("\nPlan de ahorro sugerido:")
-        for plan in plans:
-            print(f"- {plan}")
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
-    return 0
+    print("\n=== Consejos para tus finanzas ===")
+    for tip in fa.generate_tips():
+        print(" -", tip)
 
+    print("\n=== Suscripciones detectadas ===")
+    subs = fa.detect_subscriptions()
+    if subs.empty:
+        print("No se encontraron suscripciones periódicas.")
+    else:
+        print(subs.to_string(index=False))
 
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+if __name__ == '__main__':
+    main()
