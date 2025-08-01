@@ -1,78 +1,111 @@
 import pandas as pd
-import numpy as np
+import re
 from datetime import datetime
+from typing import List
 
-# Nombre de las columnas en tu extracto
-DATE_COL      = "fecha_operacion"
-CONCEPT_COL   = "concepto"
-AMOUNT_COL    = "importe"
-
-# Lista de palabras clave para identificar posibles suscripciones
+# ---------------------------------------------------
+# Ajustes de columnas y palabras clave de suscripciones
+# ---------------------------------------------------
+DATE_COL = "FECHA OPERACIÓN"      # Nombre de la columna de fecha en tu extracto
+CONCEPT_COL = "CONCEPTO"          # Nombre de la columna de concepto
+AMOUNT_COL = "IMPORTE EUR"        # Nombre de la columna de importe
 SUBSCRIPTION_KEYWORDS = [
-    "digi", "digimobil", "telefonica", "orange", "vodafone", "jazztel", "simyo",
-    "fibra", "internet", "movil", "movistar",
-    "netflix", "spotify", "amazon prime", "disney", "hbo", "youtube premium",
-    "itunes", "app store", "google youtube", "yt music",
-    "suscripcion", "cuota",
-    "alquiler", "hipoteca",
-    "endesa", "iberdrola", "naturgy", "luz", "agua", "gas", "electricidad",
+    "digi", "movil", "telefonica", "fibra", "internet",
+    "netflix", "youtube", "youtubepremium", "ytmusic", "spotify",
+    "apple", "applecom", "dazn", "primevideo", "hbo", "disney",
+    "suscripcion", "mensual"
 ]
 
+# ------------------------------
+# Lógica principal de detección
+# ------------------------------
 def detect_subscriptions(path: str) -> pd.DataFrame:
     """
-    Detecta cargos mensuales en el extracto.
-    Lee CSV o Excel (con cabecera en la fila 8, header=7).
-    Devuelve un DataFrame con:
-      - Proveedor (keyword)
-      - Importe medio (€)
-      - Fecha desde la primera detección
-      - Número de meses detectados
-    Solo mantiene aquellos keywords que aparecen en al menos
-    total_meses - 1 meses (para tolerar un mes perdido).
+    Lee el extracto (XLS/XLSX o CSV), busca cargos recurrentes mensuales
+    que contengan alguna de las SUBSCRIPTION_KEYWORDS en el concepto,
+    y devuelve un DataFrame con:
+        - concepto
+        - importe
+        - primera fecha detectada
+        - última fecha detectada
+        - veces facturadas
     """
-    # 1) Leer fichero (CSV si termina en .csv, si no, Excel)
-    if path.lower().endswith(".csv"):
-        df = pd.read_csv(path, sep=";", dtype=str)
-    else:
-        df = pd.read_excel(path, header=7, engine="openpyxl", dtype=str)
+    # 1) Carga según extensión
+    try:
+        if path.lower().endswith((".xls", ".xlsx")):
+            df = pd.read_excel(path, header=7, engine="openpyxl", dtype=str)
+        else:
+            # CSV: inferimos delimitador como ';' o ','
+            sep = ";" if pd.read_csv(path, nrows=3, sep=";").shape[1] > 3 else ","
+            df = pd.read_csv(path, header=7, sep=sep, dtype=str)
+    except Exception as e:
+        raise RuntimeError(f"Error al leer el fichero: {e}")
 
-    # 2) Normalizar y parsear tipos
-    #    - Fecha (dayfirst)
+    # 2) Normalizar nombres de columna
+    df.columns = [c.strip().upper() for c in df.columns]
+    if DATE_COL not in df.columns:
+        raise RuntimeError(f"No encontré la columna de fecha '{DATE_COL}'. "
+                           f"Columnas disponibles: {df.columns.tolist()}")
+    if CONCEPT_COL not in df.columns:
+        raise RuntimeError(f"No encontré la columna de concepto '{CONCEPT_COL}'.")
+    if AMOUNT_COL not in df.columns:
+        raise RuntimeError(f"No encontré la columna de importe '{AMOUNT_COL}'.")
+
+    # 3) Filtrar solo cargos negativos (pagos)
+    df = df[[DATE_COL, CONCEPT_COL, AMOUNT_COL]].copy()
+    # Parseo fechas
     df[DATE_COL] = pd.to_datetime(df[DATE_COL], dayfirst=True, errors="coerce")
-    #    - Concepto en minúsculas
-    df[CONCEPT_COL] = df[CONCEPT_COL].str.lower().fillna("")
-    #    - Importe como float (cambia coma por punto)
+    df = df.dropna(subset=[DATE_COL])
+    # Convertir importe a float
     df[AMOUNT_COL] = df[AMOUNT_COL].str.replace(",", ".").astype(float)
 
-    # 3) Crear columna periodo mensual y calcular número total de meses en datos
-    df["periodo"] = df[DATE_COL].dt.to_period("M")
-    total_meses = df["periodo"].nunique()
+    pagos = df[df[AMOUNT_COL] < 0].copy()
+    pagos[CONCEPT_COL] = pagos[CONCEPT_COL].str.lower()
 
-    # 4) Para cada keyword, comprobamos en cuántos meses distintos aparece
-    subs = []
-    for kw in SUBSCRIPTION_KEYWORDS:
-        mask = df[CONCEPT_COL].str.contains(kw, regex=False)
-        df_kw = df[mask]
-        meses_distintos = df_kw["periodo"].nunique()
-        # Si aparece en al menos total_meses-1 meses, lo consideramos suscripción
-        if meses_distintos >= max(1, total_meses - 1):
-            fecha_primera = df_kw[DATE_COL].min()
-            importe_medio = df_kw[AMOUNT_COL].mean()
-            subs.append({
-                "Proveedor (keyword)": kw,
-                "Importe medio (€)": round(importe_medio, 2),
-                "Desde": fecha_primera,
-                "Meses detectados": int(meses_distintos)
-            })
+    # 4) Quedarse solo con conceptos que contengan keyword de suscripción
+    pattern = re.compile("|".join(re.escape(k) for k in SUBSCRIPTION_KEYWORDS), re.IGNORECASE)
+    pagos = pagos[pagos[CONCEPT_COL].str.contains(pattern)]
+    if pagos.empty:
+        return pd.DataFrame(columns=[CONCEPT_COL, AMOUNT_COL, "first_date", "last_date", "count"])
 
-    return pd.DataFrame(subs)
+    # 5) Agrupar por concepto exacto y ver periodicidad mensual
+    pagos["year_month"] = pagos[DATE_COL].dt.to_period("M")
+    grouped = pagos.groupby(CONCEPT_COL)
+
+    rows = []
+    for concept, grp in grouped:
+        months = grp["year_month"].unique()
+        if len(months) < 2:
+            continue  # no es realmente recurrente
+        # Ordenar meses y ver que estén mayoritariamente cada ~30 días
+        months = sorted(months)
+        # Guardar summarize
+        rows.append({
+            CONCEPT_COL: concept,
+            AMOUNT_COL: grp[AMOUNT_COL].iloc[0],
+            "first_date": grp[DATE_COL].min().date(),
+            "last_date": grp[DATE_COL].max().date(),
+            "count": len(months),
+        })
+
+    result = pd.DataFrame(rows)
+    # Marcar como "mensual" si al menos 3 meses distintos
+    return result[result["count"] >= 3]
 
 
+# -----------------------
+# Ejecución standalone
+# -----------------------
 if __name__ == "__main__":
     import sys
-    fichero = sys.argv[1] if len(sys.argv) > 1 else "export2025730.csv"
-    df_subs = detect_subscriptions(fichero)
+    if len(sys.argv) > 1:
+        path = sys.argv[1]
+    else:
+        path = "export2025730.xls"  # cambia al nombre por defecto si lo deseas
+
+    print("Detectando suscripciones en:", path)
+    df_subs = detect_subscriptions(path)
     if df_subs.empty:
-        print("No se detectaron suscripciones mensuales.")
+        print("No se detectaron suscripciones recurrentes.")
     else:
         print(df_subs.to_string(index=False))
