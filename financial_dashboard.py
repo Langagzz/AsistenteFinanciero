@@ -10,6 +10,7 @@ y recibir consejos y planes de ahorro sugeridos basados en los datos.
 Para ejecutar la aplicación:
 
     pip install streamlit plotly pandas numpy xlrd
+    pip install streamlit plotly pandas xlrd
     streamlit run financial_dashboard.py
 
 La aplicación se abrirá en tu navegador predeterminado (normalmente en
@@ -35,7 +36,7 @@ def main():
 
     # Cargador de archivos
     uploaded_file = st.file_uploader(
-        "Sube tu extracto bancario en formato Excel (.xls, .xlsx) o CSV", type=["xls", "xlsx", "csv"]
+@@ -39,104 +39,103 @@ def main():
     )
 
     if uploaded_file is not None:
@@ -63,6 +64,8 @@ def main():
         total_ingresos = assistant.dataframe[assistant.dataframe['importe'] > 0]['importe'].sum()
         total_gastos = assistant.dataframe[assistant.dataframe['importe'] < 0]['importe'].sum()
         ahorro = total_ingresos + total_gastos
+        total_gastos = -assistant.dataframe[assistant.dataframe['importe'] < 0]['importe'].sum()
+        ahorro = total_ingresos - total_gastos
         col1, col2, col3 = st.columns(3)
         col1.metric("Ingresos totales", f"{total_ingresos:,.2f} €")
         col2.metric("Gastos totales", f"{total_gastos:,.2f} €")
@@ -130,6 +133,7 @@ def main():
         # Planes de ahorro sugeridos
         st.header("Planes de ahorro sugeridos")
         plans = assistant.suggest_saving_plan() if hasattr(assistant, 'suggest_saving_plan') else []
+        plans = assistant.suggest_saving_plan()
         for plan in plans:
             st.markdown(f"- {plan}")
 
