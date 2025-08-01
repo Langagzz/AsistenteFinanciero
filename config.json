@@ -1,0 +1,8 @@
+{
+  "data_dir": ".",
+  "data_file": "export2025730.csv",
+  "sep": ";",
+  "header_row": 7,
+  "date_column": "FECHA OPERACIÓN",
+  "subs_period_days": 30
+}
