@@ -32,6 +32,7 @@ from financial_assistant import FinancialAssistant
 
 def main():
 def main() -> None:
+    """Run the Streamlit dashboard application."""
     st.set_page_config(page_title="Asistente financiero", layout="wide")
     st.title("Asistente financiero y analizador de gastos")
     st.write(
