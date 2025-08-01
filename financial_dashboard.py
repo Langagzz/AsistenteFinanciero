@@ -1,13 +1,16 @@
+
 """Streamlit dashboard for the financial assistant."""
 
 import os
 import tempfile
+
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from financial_assistant import FinancialAssistant
+
 
 
 def main() -> None:
@@ -17,6 +20,7 @@ def main() -> None:
     transactions using :class:`FinancialAssistant` and displays charts
     and tips in a Streamlit interface.
     """
+
     st.set_page_config(page_title="Asistente financiero", layout="wide")
     st.title("Asistente financiero y analizador de gastos")
     st.write(
@@ -24,8 +28,10 @@ def main() -> None:
     )
 
     uploaded_file = st.file_uploader(
+
         "Sube tu extracto bancario en formato Excel (.xls, .xlsx) o CSV", type=["xls", "xlsx", "csv"]
     )
+
 
     if uploaded_file is None:
         st.info(

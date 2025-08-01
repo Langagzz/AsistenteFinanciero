@@ -1,3 +1,4 @@
+
 """Financial Assistant CLI utility."""
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
 
 # Diccionario por defecto de categorías y palabras clave
 DEFAULT_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
@@ -29,6 +31,7 @@ DEFAULT_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
         "atm",
         "reintegro",
         "pension",
+
         "abono",
         "devolucion",
     ],
@@ -215,6 +218,7 @@ def _normalize_description(desc: str) -> str:
         if desc.startswith(prefix):
             desc = desc[len(prefix) :]
             break
+
     for token in [",", ";", ":", ".", "-", "*", "#", "!", "@"]:
         desc = desc.replace(token, " ")
     desc = " ".join(desc.split())
@@ -242,10 +246,12 @@ class FinancialAssistant:
             return DEFAULT_CATEGORY_KEYWORDS
 
     def load_transactions(self) -> None:
+
         """Carga el fichero de movimientos bancarios en un DataFrame."""
         if self.filename.lower().endswith((".xls", ".xlsx", ".xlsm")):
             df_raw = pd.read_excel(self.filename, header=None)
             read_func = pd.read_excel
+
         elif self.filename.lower().endswith(".csv"):
             df_raw = pd.read_csv(self.filename, header=None)
             read_func = pd.read_csv
@@ -256,16 +262,19 @@ class FinancialAssistant:
 
         header_row = None
         for idx, row in df_raw.iterrows():
+
             if row.astype(str).str.contains("CONCEPTO", case=False, na=False).any():
                 header_row = idx
                 break
         if header_row is None:
             raise ValueError("No se ha encontrado la fila de cabeceras en el archivo")
 
+
         df = read_func(self.filename, header=header_row)
         rename_map: Dict[str, str] = {}
         for col in df.columns:
             lc = str(col).lower().strip()
+
             if "fecha operacion" in lc or "fecha operación" in lc:
                 rename_map[col] = "fecha_operacion"
             elif "fecha valor" in lc:
@@ -277,6 +286,7 @@ class FinancialAssistant:
             elif "saldo" in lc:
                 rename_map[col] = "saldo"
         df = df.rename(columns=rename_map)
+
         df = df[df["importe"].notnull()]
         df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce")
         df["importe"] = pd.to_numeric(df["importe"], errors="coerce")
@@ -286,14 +296,17 @@ class FinancialAssistant:
         self.dataframe = df.reset_index(drop=True)
 
     def classify_transactions(self) -> None:
+
         """Clasifica cada movimiento usando las categorías definidas."""
         if self.dataframe.empty:
+
             raise RuntimeError("Primero carga los movimientos con load_transactions().")
 
         categories: List[str] = []
         descriptions = self.dataframe["concepto"].apply(_normalize_description)
         for desc, amount in zip(descriptions, self.dataframe["importe"]):
             category_assigned: Optional[str] = None
+
             for cat, keywords in self.category_keywords.items():
                 if any(kw in desc for kw in keywords):
                     category_assigned = cat
@@ -304,13 +317,16 @@ class FinancialAssistant:
         self.dataframe["categoria"] = categories
 
     def compute_summaries(self) -> None:
+
         if "categoria" not in self.dataframe.columns:
             raise RuntimeError("Primero clasifica las transacciones con classify_transactions().")
         category_totals = (
+
             self.dataframe.groupby("categoria")["importe"].sum().reset_index().sort_values("importe", ascending=False)
         )
         self.category_totals = category_totals
         df = self.dataframe.copy()
+
         df["mes"] = df["fecha_operacion"].dt.to_period("M")
         monthly = df.pivot_table(index="mes", columns="categoria", values="importe", aggfunc="sum", fill_value=0)
         self.monthly_summary_df = monthly.sort_index()
@@ -319,10 +335,12 @@ class FinancialAssistant:
         if self.category_totals is None:
             raise RuntimeError("Debe ejecutar compute_summaries() antes de generar consejos.")
         tips: List[str] = []
+
         total_ingresos = self.dataframe[self.dataframe["importe"] > 0]["importe"].sum()
         total_gastos = -self.dataframe[self.dataframe["importe"] < 0]["importe"].sum()
         ahorro_neto = total_ingresos - total_gastos
         if total_ingresos > 0:
+
             porcentaje_necesidades = (
                 -self.dataframe[
                     (self.dataframe["categoria"].isin({"alimentacion", "servicios", "salud", "transporte", "impuestos"}))
@@ -340,20 +358,24 @@ class FinancialAssistant:
                 * 100
             )
             tips.append(
+
                 f"Ahorro neto actual: {ahorro_neto:.2f} EUR. Necesidades {porcentaje_necesidades:.1f}%, ocio {porcentaje_ocio:.1f}%"
             )
         comisiones = self.dataframe[(self.dataframe["categoria"] == "finanzas") & (self.dataframe["importe"] < 0)]
         if not comisiones.empty:
             total_comisiones = -comisiones["importe"].sum()
             tips.append(
+
                 f"Has pagado {total_comisiones:.2f} EUR en comisiones bancarias. Considera un banco sin comisiones."
             )
         return tips
 
     def suggest_saving_plan(self) -> List[str]:
         if self.monthly_summary_df is None:
+
             raise RuntimeError("Debe ejecutar compute_summaries() antes de planificar el ahorro.")
         df = self.dataframe.copy()
+
         df["mes"] = df["fecha_operacion"].dt.to_period("M")
         ingresos = df[df["importe"] > 0].groupby("mes")["importe"].sum()
         gastos = -df[df["importe"] < 0].groupby("mes")["importe"].sum()
@@ -369,11 +391,13 @@ class FinancialAssistant:
             mes_str = str(mes)
             if ahorro_real >= objetivo:
                 plans.append(
+
                     f"Mes {mes_str}: buen trabajo, ahorraste {ahorro_real:,.2f} EUR (objetivo {objetivo:,.2f} EUR)."
                 )
             else:
                 falta = objetivo - ahorro_real
                 plans.append(
+
                     f"Mes {mes_str}: intenta ahorrar {falta:,.2f} EUR más para alcanzar el 20% de tus ingresos ({objetivo:,.2f} EUR)."
                 )
         return plans
@@ -451,6 +475,7 @@ def main(argv: List[str]) -> int:
         print(f"Error: {e}")
         return 1
     return 0
+
 
 
 if __name__ == "__main__":
